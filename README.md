@@ -1,1 +1,1 @@
-### A simple data pipeline for ingesting satellite data
+A simple data pipeline for ingesting satellite data
