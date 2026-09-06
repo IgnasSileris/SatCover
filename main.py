@@ -3,6 +3,7 @@ from tqdm import tqdm
 from skyfield.api import load
 import uuid
 
+import download
 import ingest
 import save
 import transform
@@ -26,7 +27,13 @@ def main():
     times = ts.from_datetimes(datetimes)
 
     try:
-        for batch_num, input_df in enumerate(tqdm(ingest.load_and_filter_data())):
+        input_path = download.try_download(now)
+        if input_path == None:
+            raise RuntimeError("Download failed")
+
+        for batch_num, input_df in enumerate(
+            tqdm(ingest.load_and_filter_data(input_path))
+        ):
             processed_df = transform.transform_data(input_df, ts, datetimes, times)
 
             if processed_df.is_empty():
