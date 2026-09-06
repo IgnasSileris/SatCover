@@ -3,6 +3,8 @@ import numpy as np
 import polars as pl
 from skyfield.api import EarthSatellite, Time, Timescale, wgs84
 
+from schema import TRANSFORMED_SCHEMA
+
 
 def transform_data(
     df: pl.DataFrame,
@@ -13,33 +15,51 @@ def transform_data(
     # Pre-allocate
     num_sats = len(df)
     num_times = len(times)
-    names = []
+    names: list[str] = []
+    norad_cat_ids: list[str] = []
     latitudes = np.empty(num_sats * num_times, dtype=np.float64)
     longitudes = np.empty(num_sats * num_times, dtype=np.float64)
     altitudes = np.empty(num_sats * num_times, dtype=np.float64)
-    for i, row in enumerate(df.iter_rows(named=True)):
-        satellite = EarthSatellite.from_omm(ts, row)
-        positions = satellite.at(times)
-        subpoints = wgs84.subpoint(positions)
 
-        lats = subpoints.latitude.degrees
-        longs = subpoints.longitude.degrees
-        alts = subpoints.elevation.km
+    successful_count = 0
+    for row in df.iter_rows(named=True):
+        try:
+            satellite = EarthSatellite.from_omm(ts, row)
+            positions = satellite.at(times)
+            subpoints = wgs84.subpoint(positions)
 
-        names.extend([str(satellite.name)] * num_times)
-        start_index = num_times * i
-        latitudes[start_index : start_index + num_times] = lats
-        longitudes[start_index : start_index + num_times] = longs
-        altitudes[start_index : start_index + num_times] = alts
+            start = successful_count * num_times
+            end = start + num_times
 
-    df = pl.DataFrame(
+            latitudes[start:end] = subpoints.latitude.degrees
+            longitudes[start:end] = subpoints.longitude.degrees
+            altitudes[start:end] = subpoints.elevation.km
+
+            names.extend([str(satellite.name)] * num_times)
+            norad_cat_ids.extend([row["NORAD_CAT_ID"]] * num_times)
+
+            successful_count += 1
+        except Exception as e:
+            print(
+                f"Had an issue processing and input row. Skipping. Row: {row}, Error: {e}"
+            )
+            continue
+
+    output_size = successful_count * num_times
+
+    if output_size == 0:
+        return pl.DataFrame()
+
+    output_df = pl.DataFrame(
         {
-            "timestamp": datetimes * num_sats,
+            "timestamp": datetimes * successful_count,
+            "norad_cat_id": norad_cat_ids,
             "name": names,
-            "latitude": latitudes,
-            "longitude": longitudes,
-            "altitude": altitudes,
-        }
+            "latitude": latitudes[:output_size],
+            "longitude": longitudes[:output_size],
+            "altitude": altitudes[:output_size],
+        },
+        schema=TRANSFORMED_SCHEMA,
     )
 
-    return df
+    return output_df
